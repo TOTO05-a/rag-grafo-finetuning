@@ -1,0 +1,25 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Grafo RAG · Ingesta</title><link rel="stylesheet" href="app.css"></head><body>
+<header><b>Grafo RAG</b><nav id="nav" class="hidden"><a href="/">Ingesta</a><a href="/graph.html">Grafo</a><a href="/tune.html">Estrategias</a><button class="btn2" id="out">Salir</button></nav></header>
+<main>
+<section class="card" id="auth" style="max-width:420px;margin:40px auto 0"><h1>Entrar</h1><p style="color:var(--mut)">Tus documentos y tu grafo son privados.</p>
+<label>Correo</label><input id="em" type="email" autocomplete="email"><label>Contraseña (8+)</label><input id="pw" type="password" autocomplete="current-password">
+<button class="btn" id="login">Iniciar sesión</button> <button class="btn2" id="reg">Crear cuenta</button><div class="msg" id="am"></div></section>
+<div id="app" class="hidden" style="display:grid;gap:22px">
+<section class="card"><h2>Ingesta de conocimiento</h2><p style="color:var(--mut);margin:0">Texto o archivos (PDF, DOCX, TXT, MD, CSV, JSON, HTML) → fragmentos → embeddings → entidades y relaciones.</p>
+<div class="row"><div><label>Título (texto manual)</label><input id="ti"><label>Texto</label><textarea id="tx"></textarea><label>Archivos (máx. 5, 10 MB c/u)</label><input id="fl" type="file" multiple accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json,.html,.htm"></div>
+<div><label>Instrucciones de refinamiento (opcional)</label><textarea id="in" style="min-height:250px" placeholder="Ej.: Solo tecnologías y organizaciones. Ignora nombres de personas. Tipos en español."></textarea></div></div>
+<button class="btn" id="go">Procesar y construir grafo</button><div class="msg" id="gm"></div></section>
+<section class="card"><h2>Documentos</h2><div id="dl" style="color:var(--mut)">Cargando…</div></section></div></main>
+<script>
+const $=i=>document.getElementById(i);const api=async(u,o={})=>{const r=await fetch(u,o);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j};
+const J=b=>({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+async function show(){try{await api('/api/auth/me');$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('nav').classList.remove('hidden');docs()}catch{}}
+async function docs(){const d=await api('/api/documents');$('dl').innerHTML=d.length?d.map(x=>`<div class="doc"><b></b><span>${x.chunks??'?'} frag. · ${x.newNodes??0} nodos · ${x.newEdges??0} rel.</span></div>`).join(''):'Aún no hay documentos.';[...$('dl').querySelectorAll('b')].forEach((b,i)=>b.textContent=d[i].title)}
+for(const [id,p] of [['login','login'],['reg','register']])$(id).onclick=async()=>{try{await api('/api/auth/'+p,J({email:$('em').value,password:$('pw').value}));show()}catch(e){$('am').textContent=e.message}};
+$('out').onclick=async()=>{await api('/api/auth/logout',{method:'POST'});location.reload()};
+$('go').onclick=async()=>{const b=$('go');b.disabled=true;b.innerHTML='<span class="spin"></span>Procesando… puede tardar';$('gm').textContent='';
+try{const f=new FormData();f.append('title',$('ti').value);f.append('text',$('tx').value);f.append('instructions',$('in').value);[...$('fl').files].forEach(x=>f.append('files',x));
+const {report}=await api('/api/ingest',{method:'POST',body:f});$('gm').textContent=report.map(r=>r.error?`✗ ${r.title}: ${r.error}`:`✓ ${r.title}: ${r.chunks} fragmentos, +${r.newNodes} nodos, +${r.newEdges} relaciones${r.truncated?' (solo los primeros 30 fragmentos extraídos)':''}`).join('\n');docs()}
+catch(e){$('gm').textContent='Error: '+e.message}b.disabled=false;b.textContent='Procesar y construir grafo'};
+show();
+</script></body></html>

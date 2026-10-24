@@ -1,0 +1,42 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Grafo RAG · Estrategias</title><link rel="stylesheet" href="app.css">
+<style>.tabs{display:flex;gap:6px;flex-wrap:wrap;background:#0e1420;border:1px solid var(--line);border-radius:12px;padding:5px}.tabs button{flex:1;min-width:130px;background:none;border:0;color:var(--mut);padding:10px;border-radius:8px;font:inherit;cursor:pointer;transition:background .2s,color .2s}.tabs button.on{background:var(--ac);color:#06241f;font-weight:600}
+.note{border-left:3px solid var(--ac2);background:#f5b86b12;padding:10px 14px;border-radius:0 10px 10px 0;color:var(--tx);margin:12px 0}.ex{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);color:var(--mut);font-size:.9rem}.ex span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ex button{background:none;border:0;color:#f58fa8;cursor:pointer}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}pre.msg{font:inherit;color:var(--tx)}</style></head><body>
+<header><b>Grafo RAG</b><nav><a href="/">Ingesta</a><a href="/graph.html">Grafo</a><a href="/tune.html">Estrategias</a></nav></header>
+<main><div class="tabs" id="tabs"></div><section class="card" id="panel"></section></main>
+<script>
+const api=async(u,o={})=>{const r=await fetch(u,o);if(r.status===401)location.href='/';const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j};
+const J=(b,m='POST')=>({method:m,headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+const h=(t,p={},...k)=>{const e=Object.assign(document.createElement(t),p);k.flat().forEach(x=>e.append(x));return e};
+const S={
+transfer:{n:'Transfer Learning',note:'ENTRENAMIENTO REAL (parcial): se entrena localmente una capa clasificadora sobre embeddings congelados de OpenRouter. El modelo base no cambia. Requiere 6+ ejemplos, 2+ etiquetas y 2+ ejemplos por etiqueta.',f:[['text','Texto','textarea'],['label','Etiqueta','input']]},
+sft:{n:'SFT',note:'DATASET REAL, SIN ENTRENAMIENTO: OpenRouter no permite fine-tuning de pesos. Aquí curas pares prompt→respuesta y los exportas en JSONL (formato chat) para entrenar fuera (p. ej. Unsloth/Colab con un modelo abierto). Se recomiendan 100+ pares.',f:[['prompt','Prompt del usuario','textarea'],['response','Respuesta ideal','textarea']]},
+fewshot:{n:'Few-shot',note:'PROMPTING, NO ENTRENA: se eligen por similitud (embeddings) hasta k ejemplos tuyos y se envían como demostraciones al LLM. No modifica pesos.',f:[['input','Entrada de ejemplo','textarea'],['output','Salida esperada','textarea']]},
+instruction:{n:'Instruction',note:'DATASET + EJECUCIÓN, SIN ENTRENAR: guarda ejemplos (instrucción, entrada, salida) exportables en formato Alpaca. Al ejecutar una instrucción idéntica se usan hasta 3 ejemplos guardados como demostración.',f:[['instruction','Instrucción','input'],['input','Entrada (opcional)','textarea'],['output','Salida esperada','textarea']]},
+domain:{n:'Dominio'}};
+let cur='transfer';
+const tabs=document.getElementById('tabs'),panel=document.getElementById('panel');
+function drawTabs(){tabs.replaceChildren(...Object.entries(S).map(([k,v])=>h('button',{textContent:v.n,className:k===cur?'on':'',onclick:()=>{cur=k;drawTabs();render()}})))}
+const out=h('pre',{className:'msg'});const say=(t)=>out.textContent=t;
+async function run(btn,fn){const t=btn.textContent;btn.disabled=true;btn.textContent='Procesando…';try{await fn()}catch(e){say('Error: '+e.message)}btn.disabled=false;btn.textContent=t}
+async function render(){panel.replaceChildren(h('p',{textContent:'Cargando…'}));say('');try{cur==='domain'?await renderDomain():await renderStrategy()}catch(e){panel.replaceChildren(h('p',{className:'msg',textContent:e.message}))}}
+async function renderStrategy(){const s=S[cur],d=await api('/api/tune/'+cur);const inp={};
+const form=s.f.map(([k,l,t])=>[h('label',{textContent:l}),inp[k]=h(t,{style:t==='textarea'?'min-height:70px':''})]);
+const add=h('button',{className:'btn',textContent:'Añadir ejemplo',onclick:()=>run(add,async()=>{await api('/api/tune/'+cur,J(Object.fromEntries(Object.entries(inp).map(([k,e])=>[k,e.value]))));render()})});
+const list=h('div',{},d.items.map(i=>h('div',{className:'ex'},h('span',{textContent:Object.values(s.f.map(([k])=>i[k])).filter(Boolean).join(' → ')}),h('button',{textContent:'Eliminar',onclick:async()=>{await api(`/api/tune/${cur}/${i._id}`,{method:'DELETE'});render()}}))));
+const ex=[];
+if(cur==='transfer'){const t=h('textarea',{placeholder:'Texto a clasificar',style:'min-height:60px'});const tr=h('button',{className:'btn',textContent:'Entrenar clasificador',onclick:()=>run(tr,async()=>{const r=await api('/api/tune/transfer/train',J({}));say(`Etiquetas: ${r.labels.join(', ')}\nPrecisión entrenamiento: ${(r.trainAccuracy*100).toFixed(0)}%\nPrecisión en retenidos (${r.heldOut}): ${r.testAccuracy==null?'n/d (menos de 10 ejemplos)':(r.testAccuracy*100).toFixed(0)+'%'}\n${r.note}`)})});
+const pr=h('button',{className:'btn',textContent:'Predecir',onclick:()=>run(pr,async()=>{const r=await api('/api/tune/transfer/predict',J({text:t.value}));say(r.ranking.map(x=>`${x.label}: ${(x.prob*100).toFixed(1)}%`).join('\n'))})});
+ex.push(h('div',{className:'bar'},tr),h('label',{textContent:'Probar'}),t,pr);if(d.model)ex.unshift(h('p',{style:'color:var(--mut)',textContent:`Modelo guardado: ${new Date(d.model.trainedAt).toLocaleString()} · ${d.model.labels.join(', ')}`}))}
+else{const ids=h('textarea',{placeholder:cur==='fewshot'?'Nueva entrada para el LLM':'Entrada',style:'min-height:60px'});const ins=cur==='instruction'?h('input',{placeholder:'Instrucción a ejecutar (misma que en tus ejemplos para usar demos)'}):null;const k=cur==='fewshot'?h('input',{type:'number',value:4,min:1,max:8,style:'width:80px'}):null;
+const rn=cur==='sft'?null:h('button',{className:'btn',textContent:'Ejecutar',onclick:()=>run(rn,async()=>{const r=await api(`/api/tune/${cur}/run`,J(cur==='fewshot'?{input:ids.value,k:+k.value}:{instruction:ins.value,input:ids.value}));say(r.output+'\n\n— '+r.note+` (${r.examplesUsed??r.demos} ejemplos usados)`)})});
+const dl=h('a',{className:'btn2',href:`/api/tune/${cur}/export`,textContent:`Exportar JSONL (${d.items.length}${cur==='sft'?'/100+ recomendados':''})`,style:'margin:0'});
+ex.push(h('div',{className:'bar',style:'margin-top:14px'},rn||'',dl));if(rn)ex.unshift(ins||'',ids,k?h('label',{textContent:'Ejemplos (k)'}):'',k||'')}
+panel.replaceChildren(h('h2',{textContent:s.n}),h('div',{className:'note',textContent:s.note}),...form.flat(),add,h('h2',{textContent:`Ejemplos (${d.items.length}/${d.max})`,style:'margin-top:22px'}),list,h('h2',{textContent:'Usar',style:'margin-top:22px'}),...ex,out)}
+async function renderDomain(){const p=await api('/api/tune/domain');
+const nm=h('input',{value:p.name||'',placeholder:'Ej.: Salud pública, Derecho laboral'}),et=h('input',{value:(p.entityTypes||[]).join(', '),placeholder:'Medicamento, Enfermedad, Institución'}),st=h('textarea',{textContent:p.style||'',placeholder:'Criterio o tono: preciso, citar normas…',style:'min-height:60px'}),gl=h('textarea',{textContent:(p.glossary||[]).map(t=>`${t.term}: ${t.definition}`).join('\n'),placeholder:'término: definición (uno por línea)',style:'min-height:160px'});
+const sg=h('button',{className:'btn',textContent:'Sugerir glosario desde mis documentos',onclick:()=>run(sg,async()=>{const r=await api('/api/tune/domain/glossary',J({}));gl.value+=(gl.value?'\n':'')+r.terms.map(t=>`${t.term}: ${t.definition}`).join('\n');say('Sugerencias añadidas: revísalas y pulsa Guardar.')})});
+const sv=h('button',{className:'btn',textContent:'Guardar perfil',onclick:()=>run(sv,async()=>{const r=await api('/api/tune/domain',J({name:nm.value,entityTypes:et.value,style:st.value,glossary:gl.value},'PUT'));say(`Guardado: ${r.glossary.length} términos, ${r.entityTypes.length} tipos de entidad.`)})});
+panel.replaceChildren(h('h2',{textContent:'Dominio'}),h('div',{className:'note',textContent:'ADAPTACIÓN POR CONTEXTO, NO ENTRENA: este perfil (glosario, tipos de entidad, estilo) se inyecta en la extracción del grafo, en las preguntas RAG y en Few-shot/Instruction. No modifica pesos.'}),h('label',{textContent:'Dominio'}),nm,h('label',{textContent:'Tipos de entidad (separados por coma)'}),et,h('label',{textContent:'Estilo / criterio'}),st,h('label',{textContent:'Glosario'}),gl,h('div',{className:'bar'},sv,sg),out)}
+drawTabs();render();
+</script></body></html>
